@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>تسجيل الدوام - SalahTeam</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Cairo', sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+        .glass { background: rgba(255,255,255,0.95); backdrop-filter: blur(10px); }
+        .pulse { animation: pulse 2s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+        .offline-badge { position: fixed; top: 10px; left: 10px; background: #ef4444; color: white; padding: 5px 15px; border-radius: 20px; font-size: 12px; font-weight: bold; }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4">
+
+    <!-- شريط حالة الاتصال -->
+    <div id="offlineBadge" class="offline-badge hidden">📴 وضع عدم الاتصال</div>
+
+    <div class="glass rounded-3xl p-8 w-full max-w-md shadow-2xl">
+        <!-- Header -->
+        <div class="text-center mb-8">
+            <div class="inline-flex items-center justify-center w-16 h-16 bg-blue-600 rounded-2xl mb-4">
+                <i data-lucide="clock" class="text-white" size="32"></i>
+            </div>
+            <h1 class="text-2xl font-black text-slate-800">نظام تسجيل الدوام</h1>
+            <p class="text-sm text-gray-500 mt-1">SalahTeam Attendance</p>
+        </div>
+
+        <!-- Connection Status -->
+        <div id="connectionStatus" class="flex items-center justify-center gap-2 mb-6 p-3 bg-gray-50 rounded-xl">
+            <div class="w-3 h-3 bg-gray-400 rounded-full pulse"></div>
+            <span class="text-xs font-bold text-gray-600">جاري الاتصال...</span>
+        </div>
+
+        <!-- Server URL Configuration -->
+        <div class="mb-4 p-3 bg-blue-50 rounded-xl border border-blue-100">
+            <label class="block text-xs font-bold mb-2 text-blue-800">🌐 عنوان الخادم</label>
+            <input type="text" id="serverUrl" value="http://localhost:3000" 
+                   class="w-full p-2 text-xs bg-white border rounded-lg"
+                   onchange="updateServerUrl(this.value)">
+            <p class="text-[10px] text-blue-600 mt-1">مثال: http://192.168.1.100:3000</p>
+        </div>
+
+        <!-- Login Form -->
+        <form id="loginForm" class="space-y-4">
+            <div>
+                <label class="block text-xs font-bold mb-2 text-slate-700">الرقم الوظيفي</label>
+                <select id="empSelect" required class="w-full p-4 bg-gray-50 border-2 border-gray-200 rounded-2xl outline-none focus:border-blue-500 transition">
+                    <option value="">اختر الموظف...</option>
+                </select>
+            </div>
+            <div>
+                <label class="block text-xs font-bold mb-2 text-slate-700">رمز الدخول (PIN)</label>
+                <input type="password" id="pinInput" maxlength="6" placeholder="أدخل 4-6 أرقام" 
+                       class="w-full p-4 bg-gray-50 border-2 border-gray-200 rounded-2xl outline-none focus:border-blue-500 transition text-center text-2xl tracking-widest">
+            </div>
+            <button type="submit" id="loginBtn" class="w-full bg-blue-600 hover:bg-blue-700 text-white py-4 rounded-2xl font-black transition flex items-center justify-center gap-2">
+                <i data-lucide="log-in" size="20"></i> تسجيل الدخول
+            </button>
+        </form>
+
+        <!-- Logged In State -->
+        <div id="loggedInState" class="hidden text-center space-y-6">
+            <div class="p-6 bg-green-50 border-2 border-green-200 rounded-2xl">
+                <i data-lucide="check-circle" class="text-green-600 mx-auto mb-2" size="48"></i>
+                <p class="font-black text-green-800 text-lg" id="welcomeMsg">مرحباً، <span id="empName"></span></p>
+                <p class="text-sm text-green-600 mt-1">أنت مسجل دخول منذ <span id="sessionDuration">0</span> دقيقة</p>
+                <p class="text-xs text-gray-500 mt-2" id="loginTime"></p>
+                <p class="text-[10px] text-orange-600 mt-2" id="syncStatus"></p>
+            </div>
+            
+            <button id="logoutBtn" class="w-full bg-red-500 hover:bg-red-600 text-white py-4 rounded-2xl font-black transition flex items-center justify-center gap-2">
+                <i data-lucide="log-out" size="20"></i> تسجيل الخروج
+            </button>
+        </div>
+
+        <!-- Device Info -->
+        <div class="mt-8 p-4 bg-slate-50 rounded-xl border border-slate-100">
+            <p class="text-[10px] font-bold text-slate-400 uppercase mb-2">معلومات الجهاز</p>
+            <div class="grid grid-cols-2 gap-2 text-[10px] text-slate-600">
+                <div>🖥️ <span id="deviceName">...</span></div>
+                <div>👤 <span id="deviceUser">...</span></div>
+                <div>🔐 <span id="deviceFingerprint">...</span></div>
+                <div>📅 <span id="currentDate">...</span></div>
+            </div>
+        </div>
+
+        <!-- Pending Sync Queue -->
+        <div id="syncQueue" class="hidden mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-xl">
+            <p class="text-xs font-bold text-yellow-800 mb-2">⏳ عمليات بانتظار المزامنة</p>
+            <div id="syncQueueList" class="text-[10px] text-yellow-700"></div>
+            <button onclick="syncNow()" class="mt-2 text-xs bg-yellow-600 text-white px-3 py-1 rounded-lg">مزامنة الآن</button>
+        </div>
+
+        <!-- Error Message -->
+        <div id="errorMsg" class="hidden mt-4 p-4 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm font-bold"></div>
+    </div>
+
+    <script>
+        // --- إعدادات ---
+        let API_BASE = 'http://localhost:3000/api/auth';
+        let SERVER_BASE = 'http://localhost:3000';
+        let currentSession = null;
+        let durationInterval = null;
+        let isOnline = true;
+        let pendingSync = []; // طابور المزامنة
+
+        // --- بصمة الجهاز ---
+        function generateFingerprint() {
+            const data = [
+                navigator.platform,
+                navigator.language,
+                screen.width,
+                screen.height,
+                new Date().getTimezoneOffset()
+            ].join('|');
+            
+            // Hash بسيط
+            let hash = 0;
+            for (let i = 0; i < data.length; i++) {
+                const char = data.charCodeAt(i);
+                hash = ((hash << 5) - hash) + char;
+                hash = hash & hash;
+            }
+            return Math.abs(hash).toString(16).padStart(16, '0');
+        }
+
+        const deviceFingerprint = generateFingerprint();
+
+        // --- جلب معلومات الجهاز ---
+        function getDeviceInfo() {
+            return {
+                hostname: window.location.hostname || 'unknown',
+                userAgent: navigator.userAgent,
+                platform: navigator.platform,
+                fingerprint: deviceFingerprint,
+                timestamp: new Date().toISOString()
+            };
+        }
+
+        // --- حفظ/استرجاع من LocalStorage (Offline Storage) ---
+        function saveToLocal(key, data) {
+            localStorage.setItem(`clockapp_${key}`, JSON.stringify(data));
+        }
+
+        function loadFromLocal(key) {
+            const data = localStorage.getItem(`clockapp_${key}`);
+            return data ? JSON.parse(data) : null;
+        }
+
+        // --- تحديث عنوان الخادم ---
+        function updateServerUrl(baseUrl) {
+            SERVER_BASE = baseUrl.replace(/\/$/, '');
+            API_BASE = SERVER_BASE + '/api/auth';
+            localStorage.setItem('serverUrl', SERVER_BASE);
+            loadEmployees();
+        }
+
+        // --- حالة الاتصال ---
+        function updateConnectionStatus(connected) {
+            isOnline = connected;
+            const el = document.getElementById('connectionStatus');
+            const dot = el.querySelector('div');
+            const text = el.querySelector('span');
+            const badge = document.getElementById('offlineBadge');
+            
+            if (connected) {
+                dot.className = 'w-3 h-3 bg-green-500 rounded-full';
+                text.textContent = 'متصل بالخادم ✅';
+                text.className = 'text-xs font-bold text-green-700';
+                badge.classList.add('hidden');
+            } else {
+                dot.className = 'w-3 h-3 bg-red-500 rounded-full';
+                text.textContent = 'وضع عدم الاتصال 📴';
+                text.className = 'text-xs font-bold text-red-700';
+                badge.classList.remove('hidden');
+            }
+        }
+
+        // --- فحص الاتصال ---
+        async function checkConnection() {
+            try {
+                const res = await fetch(`${SERVER_BASE}/api/data`, { 
+                    method: 'GET', 
+                    mode: 'cors',
+                    cache: 'no-cache'
+                });
+                updateConnectionStatus(res.ok);
+                if (res.ok && pendingSync.length > 0) {
+                    syncPendingRecords();
+                }
+                return res.ok;
+            } catch {
+                updateConnectionStatus(false);
+                return false;
+            }
+        }
+
+        // --- جلب الموظفين ---
+        async function loadEmployees() {
+            try {
+                const res = await fetch(`${API_BASE}/employees`);
+                const data = await res.json();
+                if (data.success) {
+                    const select = document.getElementById('empSelect');
+                    select.innerHTML = '<option value="">اختر الموظف...</option>';
+                    data.employees.forEach(emp => {
+                        const opt = document.createElement('option');
+                        opt.value = emp.empId;
+                        opt.textContent = `${emp.empId} - ${emp.name} (${emp.department})`;
+                        select.appendChild(opt);
+                    });
+                    updateConnectionStatus(true);
+                }
+            } catch (err) {
+                console.error('فشل جلب الموظفين:', err);
+                // تحميل من LocalStorage إذا فشل
+                const cached = loadFromLocal('employees');
+                if (cached) {
+                    const select = document.getElementById('empSelect');
+                    select.innerHTML = '<option value="">اختر الموظف...</option>';
+                    cached.forEach(emp => {
+                        const opt = document.createElement('option');
+                        opt.value = emp.empId;
+                        opt.textContent = `${emp.empId} - ${emp.name}`;
+                        select.appendChild(opt);
+                    });
+                }
+                updateConnectionStatus(false);
+            }
+        }
+
+        // --- عرض خطأ ---
+        function showError(msg) {
+            const el = document.getElementById('errorMsg');
+            el.textContent = msg;
+            el.classList.remove('hidden');
+            setTimeout(() => el.classList.add('hidden'), 5000);
+        }
+
+        // --- إضافة للمزامنة المؤجلة ---
+        function addToSyncQueue(record) {
+            pendingSync.push(record);
+            saveToLocal('pendingSync', pendingSync);
+            updateSyncQueueDisplay();
+        }
+
+        function updateSyncQueueDisplay() {
+            const queueEl = document.getElementById('syncQueue');
+            const listEl = document.getElementById('syncQueueList');
+            
+            if (pendingSync.length > 0) {
+                queueEl.classList.remove('hidden');
+                listEl.innerHTML = pendingSync.map(r => 
+                    `<div>• ${r.empName} - ${r.type} - ${new Date(r.timestamp).toLocaleTimeString()}</div>`
+                ).join('');
+            } else {
+                queueEl.classList.add('hidden');
+            }
+        }
+
+        // --- مزامنة السجلات المؤجلة ---
+        async function syncPendingRecords() {
+            if (pendingSync.length === 0) return;
+            
+            const syncData = {
+                deviceInfo: getDeviceInfo(),
+                localData: {
+                    attendance: {},
+                    payments: {}
+                }
+            };
+
+            pendingSync.forEach(record => {
+                if (record.type === 'attendance') {
+                    if (!syncData.localData.attendance[record.empId]) {
+                        syncData.localData.attendance[record.empId] = [];
+                    }
+                    syncData.localData.attendance[record.empId].push(record.data);
+                }
+            });
+
+            try {
+                const res = await fetch(`${SERVER_BASE}/api/sync/upload`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(syncData)
+                });
+                const result = await res.json();
+                
+                if (result.success) {
+                    pendingSync = [];
+                    saveToLocal('pendingSync', pendingSync);
+                    updateSyncQueueDisplay();
+                    document.getElementById('syncStatus').textContent = '✅ تمت المزامنة';
+                    setTimeout(() => document.getElementById('syncStatus').textContent = '', 3000);
+                }
+            } catch (err) {
+                console.error('فشل المزامنة:', err);
+            }
+        }
+
+        // --- مزامنة يدوية ---
+        async function syncNow() {
+            const btn = event.target;
+            btn.disabled = true;
+            btn.textContent = 'جاري المزامنة...';
+            await syncPendingRecords();
+            btn.disabled = false;
+            btn.textContent = 'مزامنة الآن';
+        }
+
+        // --- تسجيل الدخول ---
+        document.getElementById('loginForm').onsubmit = async (e) => {
+            e.preventDefault();
+            const empId = document.getElementById('empSelect').value;
+            const pin = document.getElementById('pinInput').value;
+            const btn = document.getElementById('loginBtn');
+            
+            if (!empId || !pin) return showError('يرجى إدخال جميع الحقول');
+            
+            btn.disabled = true;
+            btn.innerHTML = '<span class="animate-spin">⏳</span> جاري الدخول...';
+            
+            const deviceInfo = getDeviceInfo();
+            const loginTime = new Date().toISOString();
+
+            // حفظ محلياً دائماً (حتى بدون إنترنت)
+            const localSession = {
+                empId,
+                loginTime,
+                deviceInfo,
+                status: 'pending'
+            };
+            saveToLocal('currentSession', localSession);
+
+            // محاولة الإرسال للخادم
+            try {
+                const res = await fetch(`${API_BASE}/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ empId, pin, deviceInfo })
+                });
+                const data = await res.json();
+                
+                if (data.success) {
+                    currentSession = data.session;
+                    saveToLocal('currentSession', { ...localSession, ...data.session, status: 'synced' });
+                    showLoggedInState(data);
+                } else {
+                    showError(data.error || 'فشل تسجيل الدخول');
+                    // البقاء على الوضع المحلي
+                    currentSession = localSession;
+                    showLoggedInState({ employee: { name: 'وضع محلي' }, session: localSession });
+                    document.getElementById('syncStatus').textContent = '📴 سيتم المزامنة عند الاتصال';
+                }
+            } catch (err) {
+                // وضع Offline
+                currentSession = localSession;
+                showLoggedInState({ employee: { name: 'وضع محلي' }, session: localSession });
+                document.getElementById('syncStatus').textContent = '📴 سيتم المزامنة عند الاتصال';
+                addToSyncQueue({
+                    type: 'attendance',
+                    empId,
+                    empName: document.getElementById('empSelect').selectedOptions[0]?.text || empId,
+                    data: { 
+                        checkIn: new Date(loginTime).toTimeString().substr(0, 5),
+                        loginTime
+                    },
+                    timestamp: loginTime
+                });
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i data-lucide="log-in" size="20"></i> تسجيل الدخول';
+                lucide.createIcons();
+            }
+        };
+
+        // --- عرض حالة تسجيل الدخول ---
+        function showLoggedInState(data) {
+            document.getElementById('loginForm').classList.add('hidden');
+            document.getElementById('loggedInState').classList.remove('hidden');
+            document.getElementById('empName').textContent = data.employee.name;
+            document.getElementById('loginTime').textContent = `دخول: ${new Date(data.session.loginTime).toLocaleString('ar-EG')}`;
+            startDurationTimer(data.session.loginTime);
+            lucide.createIcons();
+        }
+
+        // --- عداد المدة ---
+        function startDurationTimer(loginTime) {
+            const start = new Date(loginTime).getTime();
+            durationInterval = setInterval(() => {
+                const now = Date.now();
+                const mins = Math.floor((now - start) / 60000);
+                document.getElementById('sessionDuration').textContent = mins;
+            }, 60000);
+            const mins = Math.floor((Date.now() - start) / 60000);
+            document.getElementById('sessionDuration').textContent = mins;
+        }
+
+        // --- تسجيل الخروج ---
+        document.getElementById('logoutBtn').onclick = async () => {
+            if (!confirm('هل تريد تسجيل الخروج وحفظ جلسة الدوام؟')) return;
+            
+            const btn = document.getElementById('logoutBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="animate-spin">⏳</span> جاري الحفظ...';
+            
+            const logoutTime = new Date().toISOString();
+            const loginTime = currentSession.loginTime;
+            const durationHours = (new Date(logoutTime) - new Date(loginTime)) / (1000 * 60 * 60);
+
+            // إنشاء سجل الحضور
+            const attendanceRecord = {
+                id: `att_${Date.now()}`,
+                date: new Date(loginTime).toISOString().split('T')[0],
+                checkIn: new Date(loginTime).toTimeString().substr(0, 5),
+                checkOut: new Date(logoutTime).toTimeString().substr(0, 5),
+                reqHrs: 7,
+                pType: 'normal',
+                deviceInfo: currentSession.deviceInfo,
+                sessionId: currentSession.sessionId || `local_${Date.now()}`
+            };
+
+            // حفظ محلياً
+            const localData = loadFromLocal('attendance') || {};
+            const empId = currentSession.empId || currentSession.empId;
+            if (!localData[empId]) localData[empId] = [];
+            localData[empId].push(attendanceRecord);
+            saveToLocal('attendance', localData);
+
+            // محاولة الإرسال للخادم
+            if (isOnline) {
+                try {
+                    const res = await fetch(`${API_BASE}/logout`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ 
+                            sessionId: currentSession.sessionId,
+                            empId: currentSession.empId,
+                            secureToken: currentSession.secureToken
+                        })
+                    });
+                    const data = await res.json();
+                    
+                    if (data.success) {
+                        alert(`✅ تم تسجيل الخروج بنجاح!\nالمدة: ${data.summary.durationHours} ساعة`);
+                    } else {
+                        // حفظ في طابور المزامنة
+                        addToSyncQueue({
+                            type: 'attendance',
+                            empId,
+                            empName: currentSession.empName || empId,
+                            data: attendanceRecord,
+                            timestamp: logoutTime
+                        });
+                        alert(`📴 تم الحفظ محلياً. سيتم المزامنة عند الاتصال`);
+                    }
+                } catch (err) {
+                    addToSyncQueue({
+                        type: 'attendance',
+                        empId,
+                        empName: currentSession.empName || empId,
+                        data: attendanceRecord,
+                        timestamp: logoutTime
+                    });
+                    alert(`📴 تم الحفظ محلياً. سيتم المزامنة عند الاتصال`);
+                }
+            } else {
+                addToSyncQueue({
+                    type: 'attendance',
+                    empId,
+                    empName: currentSession.empName || empId,
+                    data: attendanceRecord,
+                    timestamp: logoutTime
+                });
+                alert(`📴 تم الحفظ محلياً. سيتم المزامنة عند الاتصال`);
+            }
+
+            // إعادة تعيين
+            clearInterval(durationInterval);
+            currentSession = null;
+            localStorage.removeItem('currentSession');
+            document.getElementById('loggedInState').classList.add('hidden');
+            document.getElementById('loginForm').classList.remove('hidden');
+            document.getElementById('loginForm').reset();
+            document.getElementById('pinInput').value = '';
+            updateSyncQueueDisplay();
+            
+            btn.disabled = false;
+            btn.innerHTML = '<i data-lucide="log-out" size="20"></i> تسجيل الخروج';
+            lucide.createIcons();
+        };
+
+        // --- عرض معلومات الجهاز ---
+        function displayDeviceInfo() {
+            document.getElementById('deviceName').textContent = navigator.platform || 'unknown';
+            document.getElementById('deviceUser').textContent = 'مستخدم محلي';
+            document.getElementById('deviceFingerprint').textContent = deviceFingerprint.substr(0, 8) + '...';
+            document.getElementById('currentDate').textContent = new Date().toLocaleDateString('ar-EG', {
+                weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+            });
+        }
+
+        // --- التهيئة ---
+        window.onload = () => {
+            const saved = localStorage.getItem('serverUrl');
+            if (saved) {
+                document.getElementById('serverUrl').value = saved;
+                SERVER_BASE = saved;
+                API_BASE = saved + '/api/auth';
+            }
+            
+            // استرجاع جلسة سابقة إن وجدت
+            const savedSession = loadFromLocal('currentSession');
+            if (savedSession && savedSession.loginTime) {
+                currentSession = savedSession;
+                showLoggedInState({ 
+                    employee: { name: savedSession.empName || 'موظف' }, 
+                    session: savedSession 
+                });
+                if (savedSession.status === 'pending') {
+                    document.getElementById('syncStatus').textContent = '📴 بانتظار المزامنة';
+                }
+            }
+            
+            // استرجاع طابور المزامنة
+            pendingSync = loadFromLocal('pendingSync') || [];
+            updateSyncQueueDisplay();
+            
+            loadEmployees();
+            displayDeviceInfo();
+            lucide.createIcons();
+            
+            // فحص الاتصال دوري
+            setInterval(checkConnection, 30000); // كل 30 ثانية
+        };
+    </script>
+</body>
+</html>
