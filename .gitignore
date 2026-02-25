@@ -1,0 +1,19 @@
+# قاعدة البيانات المحلية (لا نرفعها!)
+*.db
+*.db.*
+data/
+uploads/
+
+# بيئة التطوير
+node_modules/
+.env
+*.log
+
+# نظام التشغيل
+.DS_Store
+Thumbs.db
+
+# Electron
+dist/
+build/
+*.exe
