@@ -102,8 +102,10 @@
 
     <script>
         // --- إعدادات ---
-        let API_BASE = 'http://localhost:3000/api/auth';
-        let SERVER_BASE = 'http://localhost:3000';
+        // ✅ الجديد - استبدل الرابط برابط Render الخاص بك
+        const RENDER_URL = 'https://salary-app-server.onrender.com'; // ← غيّر هذا لرابطك
+        let SERVER_BASE = RENDER_URL;
+        let API_BASE = RENDER_URL + '/api/auth';
         let currentSession = null;
         let durationInterval = null;
         let isOnline = true;
