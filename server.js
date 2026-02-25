@@ -11,18 +11,20 @@ const app = express();
 // --- 1. إعداد المسارات ---
 // في بداية server.js - استبدل جزء إعداد المسارات بهذا:
 
-const appDataPath = process.env.RENDER ? '/data' : path.join(process.env.APPDATA || './', 'SalaryApp');
+const appDataPath = process.env.RENDER 
+    ? path.join(process.cwd(), 'data')  // ✅ مسار نسبي مسموح بالكتابة فيه
+    : path.join(process.env.APPDATA || process.env.LOCALAPPDATA || './', 'SalaryApp');
+
 const dbPath = path.join(appDataPath, 'salary_data.db');
 const syncLogPath = path.join(appDataPath, 'sync_log.db');
 const uploadsPath = path.join(appDataPath, 'uploads');
 
-// إنشاء المجلدات إذا لم تكن موجودة
+// التأكد من وجود المجلدات المطلوبة
 [appDataPath, uploadsPath].forEach(dir => {
     if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
     }
 });
-
 // --- 2. تهيئة قواعد البيانات ---
 const db_disk = new Datastore({ filename: dbPath, autoload: true });
 const syncLogDB = new Datastore({ filename: syncLogPath, autoload: true }); // لتتبع المزامنة
