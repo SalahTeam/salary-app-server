@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
+const axios = require('axios'); // لإضافة التحقق من IP الخارجي
 
 const app = express();
 
@@ -32,7 +33,72 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(__dirname));
 
-// --- 4. دوال مساعدة ---
+// ============================================
+// 🔐 إعدادات الأمان - عدّل هذه القيم
+// ============================================
+
+// IP الخارجي للمكتب (استبدله بـ IP مكتبك الفعلي)
+const OFFICE_PUBLIC_IP = process.env.OFFICE_PUBLIC_IP || '203.0.113.45'; // ← غيّر هذا!
+
+// هل تريد تفعيل قيد IP؟ (true = نعم، false = لا)
+const ENABLE_IP_RESTRICTION = process.env.ENABLE_IP_RESTRICTION === 'true' || false;
+
+// ============================================
+// 🛡️ دوال الأمان
+// ============================================
+
+// الحصول على IP الخارجي للعميل
+function getClientIP(req) {
+    // مع مراعاة البروكسي (Render يستخدم بروكسي)
+    const forwarded = req.headers['x-forwarded-for'];
+    if (forwarded) {
+        return forwarded.split(',')[0].trim();
+    }
+    return req.socket.remoteAddress || 'unknown';
+}
+
+// التحقق مما إذا كان IP العميل مسموحاً له
+async function isAccessAllowed(req, employee) {
+    const clientIP = getClientIP(req);
+    
+    // إذا كان قيد IP معطل، اسمح للجميع
+    if (!ENABLE_IP_RESTRICTION) {
+        return { allowed: true, reason: 'IP restriction disabled' };
+    }
+    
+    // إذا كان الموظف مسموح له بالعمل عن بُعد، اسمح له من أي مكان
+    if (employee.allowRemote === true) {
+        return { allowed: true, reason: 'Remote access allowed for this employee' };
+    }
+    
+    // تحقق من IP الخارجي
+    if (clientIP === OFFICE_PUBLIC_IP) {
+        return { allowed: true, reason: 'Office IP verified' };
+    }
+    
+    // رفض الوصول
+    return { 
+        allowed: false, 
+        reason: 'Access denied - Not from office IP and remote access not allowed',
+        clientIP,
+        officeIP: OFFICE_PUBLIC_IP
+    };
+}
+
+// تسجيل محاولة دخول
+function logAccessAttempt(empId, allowed, reason, ip, deviceInfo) {
+    syncLogDB.insert({
+        type: allowed ? 'login_success' : 'login_blocked',
+        empId,
+        allowed,
+        reason,
+        ip,
+        deviceInfo,
+        timestamp: new Date().toISOString()
+    });
+}
+
+// دوال مساعدة أخرى
 function generateDeviceFingerprint() {
     const info = [os.hostname(), os.userInfo().username, os.platform(), os.totalmem(), os.cpus()[0]?.model].join('|');
     return crypto.createHash('sha256').update(info).digest('hex').substr(0, 16);
@@ -60,7 +126,7 @@ function generateSecureToken(empId, deviceFingerprint) {
 }
 
 // ============================================
-// 🔐 مسارات المصادقة والجلسات (المطلوبة لـ clock.html)
+// 🔐 مسارات المصادقة والجلسات
 // ============================================
 
 // ✅ جلب قائمة الموظفين للدخول
@@ -68,27 +134,60 @@ app.get('/api/auth/employees', (req, res) => {
     db_disk.findOne({ type: 'main_db' }, (err, doc) => {
         if (err) return res.status(500).json({ error: err.message });
         const employees = (doc?.employees || []).map(e => ({
-            id: e.id, name: e.name, empId: e.empId, department: e.department
+            id: e.id, 
+            name: e.name, 
+            empId: e.empId, 
+            department: e.department,
+            allowRemote: e.allowRemote || false // إظهار حالة العمل عن بُعد
         }));
         res.json({ success: true, employees });
     });
 });
 
-// ✅ تسجيل دخول الموظف
-app.post('/api/auth/login', (req, res) => {
+// ✅ تسجيل دخول الموظف (مع التحقق من IP)
+app.post('/api/auth/login', async (req, res) => {
     const { empId, pin, deviceInfo } = req.body;
-    if (!empId || !pin) return res.status(400).json({ success: false, error: 'يرجى إدخال الرقم الوظيفي ورمز الدخول' });
+    const clientIP = getClientIP(req);
+    
+    if (!empId || !pin) {
+        return res.status(400).json({ success: false, error: 'يرجى إدخال الرقم الوظيفي ورمز الدخول' });
+    }
 
     const deviceFingerprint = deviceInfo?.fingerprint || generateDeviceFingerprint();
     
-    db_disk.findOne({ type: 'main_db' }, (err, doc) => {
+    db_disk.findOne({ type: 'main_db' }, async (err, doc) => {
         if (err) return res.status(500).json({ error: err.message });
+        
         const employee = (doc?.employees || []).find(e => e.empId === empId && e.pin == pin);
         
-        if (!employee) return res.status(401).json({ success: false, error: 'الرقم الوظيفي أو رمز الدخول غير صحيح' });
+        if (!employee) {
+            logAccessAttempt(empId, false, 'Invalid credentials', clientIP, deviceInfo);
+            return res.status(401).json({ success: false, error: 'الرقم الوظيفي أو رمز الدخول غير صحيح' });
+        }
 
+        // ✅ التحقق من صلاحية الوصول (IP + allowRemote)
+        const accessCheck = await isAccessAllowed(req, employee);
+        
+        if (!accessCheck.allowed) {
+            logAccessAttempt(empId, false, accessCheck.reason, clientIP, deviceInfo);
+            return res.status(403).json({ 
+                success: false, 
+                error: 'تسجيل الدخول غير مسموح من هذا الموقع',
+                details: process.env.NODE_ENV === 'development' ? accessCheck : undefined
+            });
+        }
+
+        // التحقق من جلسة نشطة
         sessionsDB.findOne({ empId: employee.id, isActive: true }, (err, activeSession) => {
-            if (activeSession) return res.status(400).json({ success: false, error: 'هذا الموظف مسجل دخول بالفعل', device: activeSession.deviceInfo?.hostname });
+            if (activeSession) {
+                logAccessAttempt(empId, false, 'Already logged in', clientIP, deviceInfo);
+                return res.status(400).json({ 
+                    success: false, 
+                    error: 'هذا الموظف مسجل دخول بالفعل',
+                    device: activeSession.deviceInfo?.hostname,
+                    loginTime: activeSession.loginTime
+                });
+            }
 
             const secureToken = generateSecureToken(employee.id, deviceFingerprint);
             const session = {
@@ -97,15 +196,26 @@ app.post('/api/auth/login', (req, res) => {
                 empName: employee.name,
                 empCode: employee.empId,
                 loginTime: new Date().toISOString(),
-                deviceInfo: { ...deviceInfo, fingerprint: deviceFingerprint },
+                deviceInfo: { ...deviceInfo, fingerprint: deviceFingerprint, ip: clientIP },
                 secureToken,
-                isActive: true
+                isActive: true,
+                loginIP: clientIP,
+                fromOffice: clientIP === OFFICE_PUBLIC_IP
             };
 
             sessionsDB.insert(session, (err, newDoc) => {
                 if (err) return res.status(500).json({ error: err.message });
-                syncLogDB.insert({ type: 'login', sessionId: newDoc.sessionId, empId: employee.id, timestamp: new Date().toISOString() });
-                res.json({ success: true, message: 'تم تسجيل الدخول', session: newDoc, employee: { id: employee.id, name: employee.name, empId: employee.empId }, secureToken });
+                
+                logAccessAttempt(employee.id, true, 'Login successful', clientIP, deviceInfo);
+                
+                res.json({ 
+                    success: true, 
+                    message: 'تم تسجيل الدخول بنجاح',
+                    session: newDoc,
+                    employee: { id: employee.id, name: employee.name, empId: employee.empId },
+                    secureToken,
+                    fromOffice: clientIP === OFFICE_PUBLIC_IP
+                });
             });
         });
     });
@@ -141,14 +251,16 @@ app.post('/api/auth/logout', (req, res) => {
                     pType: 'normal',
                     deviceInfo: session.deviceInfo,
                     sessionId: session.sessionId,
-                    syncStatus: 'synced'
+                    syncStatus: 'synced',
+                    fromOffice: session.fromOffice,
+                    loginIP: session.loginIP
                 };
                 
                 doc.attendance[session.empId].push(attendanceRecord);
                 db_disk.update({ type: 'main_db' }, doc, { upsert: true }, (err) => {
                     if (err) return res.status(500).json({ error: 'فشل حفظ سجل الحضور' });
                     syncLogDB.insert({ type: 'logout', sessionId: session.sessionId, empId: session.empId, timestamp: new Date().toISOString() });
-                    res.json({ success: true, message: 'تم تسجيل الخروج', summary: { loginTime: session.loginTime, logoutTime, durationHours: parseFloat(durationHours.toFixed(2)), date: attendanceRecord.date } });
+                    res.json({ success: true, message: 'تم تسجيل الخروج', summary: { loginTime: session.loginTime, logoutTime, durationHours: parseFloat(durationHours.toFixed(2)), date: attendanceRecord.date, fromOffice: session.fromOffice } });
                 });
             });
         });
@@ -162,6 +274,17 @@ app.get('/api/auth/sessions', (req, res) => {
         const sessions = docs.map(s => ({ ...s, currentDurationMinutes: Math.floor((Date.now() - new Date(s.loginTime)) / 60000) }));
         res.json({ success: true, sessions });
     });
+});
+
+// ✅ جلب سجل محاولات الدخول (للمشرف)
+app.get('/api/auth/access-log', (req, res) => {
+    syncLogDB.find({ type: { $in: ['login_success', 'login_blocked'] } })
+        .sort({ timestamp: -1 })
+        .limit(100)
+        .exec((err, docs) => {
+            if (err) return res.status(500).json({ error: err.message });
+            res.json({ success: true, logs: docs });
+        });
 });
 
 // ============================================
@@ -207,12 +330,12 @@ app.post('/api/sync/upload', (req, res) => {
 app.get('/api/sync/download', (req, res) => {
     db_disk.findOne({ type: 'main_db' }, (err, doc) => {
         if (err) return res.status(500).json({ error: err.message });
-        res.json({ success: true, data: { employees: (doc?.employees || []).map(e => ({ id: e.id, name: e.name, empId: e.empId, department: e.department })), lastSync: new Date().toISOString() } });
+        res.json({ success: true, data: { employees: (doc?.employees || []).map(e => ({ id: e.id, name: e.name, empId: e.empId, department: e.department, allowRemote: e.allowRemote })), lastSync: new Date().toISOString() } });
     });
 });
 
 // ============================================
-// 📦 المسارات القديمة (موجودة أصلاً)
+// 📦 المسارات القديمة
 // ============================================
 
 app.post('/api/backup', (req, res) => {
@@ -259,10 +382,12 @@ app.listen(PORT, HOST, () => {
     const deviceInfo = getDeviceInfo();
     console.log(`✅ Server running at: http://localhost:${PORT}`);
     console.log(`🌐 Public URL: ${process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`}`);
+    console.log(`🔐 Office IP Restriction: ${ENABLE_IP_RESTRICTION ? 'ENABLED' : 'DISABLED'}`);
+    console.log(`🏢 Office Public IP: ${OFFICE_PUBLIC_IP}`);
     console.log(`🔐 Fingerprint: ${deviceInfo.fingerprint}`);
 });
 
-// ✅ معالجة المسارات غير الموجودة (لمنع إرجاع HTML)
+// ✅ معالجة 404
 app.use((req, res) => {
     res.status(404).json({ error: 'Endpoint not found', path: req.path });
 });

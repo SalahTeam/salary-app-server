@@ -106,7 +106,14 @@
                     <label class="block text-xs font-bold mb-1">ساعات الدوام اليومية</label>
                     <input type="number" name="dailyHours" value="7" required class="w-full p-3 bg-gray-50 border rounded-xl">
                 </div>
-                <button type="submit" class="md:col-span-2 bg-slate-900 text-white py-4 rounded-2xl font-black mt-4">حفظ بيانات الموظف</button>
+                <div class="md:col-span-2">
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" name="allowRemote" class="w-4 h-4 text-blue-600 rounded">
+                        <span class="text-xs font-bold">✅ السماح بالعمل عن بُعد (من أي مكان)</span>
+                    </label>
+                    <p class="text-[10px] text-gray-500 mt-1 mr-6">إذا تم التحديد، يمكن لهذا الموظف تسجيل الدخول من خارج المكتب</p>
+                </div>
+                                <button type="submit" class="md:col-span-2 bg-slate-900 text-white py-4 rounded-2xl font-black mt-4">حفظ بيانات الموظف</button>
                 <button type="button" onclick="window.toggleModal('addEmployeeModal')" class="md:col-span-2 text-gray-400 font-bold text-sm">إلغاء</button>
             </form>
         </div>
