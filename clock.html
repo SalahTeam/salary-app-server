@@ -205,8 +205,19 @@
         // --- جلب الموظفين ---
         async function loadEmployees() {
             try {
-                const res = await fetch(`${API_BASE}/employees`);
+                const res = await fetch(`${API_BASE}/employees`, { 
+                    headers: { 'Accept': 'application/json' },
+                    cache: 'no-cache'
+                });
+                
+                // تحقق من نوع المحتوى
+                const contentType = res.headers.get('content-type');
+                if (!contentType || !contentType.includes('application/json')) {
+                    throw new Error('الخادم يُرجع بيانات غير صحيحة (HTML بدلاً من JSON)');
+                }
+                
                 const data = await res.json();
+                
                 if (data.success) {
                     const select = document.getElementById('empSelect');
                     select.innerHTML = '<option value="">اختر الموظف...</option>';
@@ -217,25 +228,31 @@
                         select.appendChild(opt);
                     });
                     updateConnectionStatus(true);
+                } else {
+                    showError(data.error || 'فشل جلب الموظفين');
+                    updateConnectionStatus(false);
                 }
             } catch (err) {
                 console.error('فشل جلب الموظفين:', err);
-                // تحميل من LocalStorage إذا فشل
-                const cached = loadFromLocal('employees');
+                updateConnectionStatus(false);
+                
+                // حاول تحميل من الذاكرة المؤقتة
+                const cached = localStorage.getItem('cached_employees');
                 if (cached) {
+                    const employees = JSON.parse(cached);
                     const select = document.getElementById('empSelect');
                     select.innerHTML = '<option value="">اختر الموظف...</option>';
-                    cached.forEach(emp => {
+                    employees.forEach(emp => {
                         const opt = document.createElement('option');
                         opt.value = emp.empId;
                         opt.textContent = `${emp.empId} - ${emp.name}`;
                         select.appendChild(opt);
                     });
                 }
-                updateConnectionStatus(false);
+                
+                showError('تعذر الاتصال بالخادم. تأكد من: 1) الخادم يعمل 2) الرابط صحيح 3) الإنترنت متصل');
             }
         }
-
         // --- عرض خطأ ---
         function showError(msg) {
             const el = document.getElementById('errorMsg');
